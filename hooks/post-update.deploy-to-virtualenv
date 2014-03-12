@@ -1,0 +1,52 @@
+#!/bin/bash
+# Create a new virtualenv for each updated ref.
+#
+# If the ref does not exist, it removes the virtual env.
+#
+# This hook creates Python virtual environments for each updated ref if one
+# does not already exist. It then runs a setuptools script assumed to be at
+# the root of the repository and installs it to a predefined location.
+
+envs="$(pwd)/virtualenv"
+
+for ref in "$@"; do
+  set -eu
+  env="$envs/$ref"
+
+  # Create a new virtualenv
+  if ! git show-ref "$ref" > /dev/null; then
+    echo "Removing virtualenv: $env"
+    rm -rf "$env"
+    continue
+  elif [ -e "$env" ]; then
+    echo "Using existing virtualenv: $ref"
+  else
+    virtualenv --system-site-packages $env > /dev/null
+    echo "New virtualenv deployed: $ref"
+  fi
+
+  # Dump out files to a temporary directory
+  t=`mktemp -d -t virtualenv-deploy.XXXXXX`
+  echo "Dumping $ref to $t"
+  git archive "$ref" | ( cd $t; tar -x )
+
+  # Activate virtual env (causes unbound variable errors)
+  set +eu
+  source "$env/bin/activate"
+  set -eu
+
+  if [ -e "$t/setup.py" ]; then
+    echo "Installing $ref..."
+    python "$t/setup.py" install > /dev/null
+  else
+    echo "No setup.py found at root. Skipping $ref..."
+  fi
+
+  # Deactivate virtualenv
+  set +eu
+  deactivate
+  set -eu
+
+  # Cleanup
+  rm -rf "$t"
+done
